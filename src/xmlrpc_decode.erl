@@ -1,3 +1,4 @@
+%% -*- coding: utf-8 -*-
 %% Copyright (C) 2003 Joakim Grebenö <jocke@gleipnir.com>.
 %% All rights reserved.
 %%
@@ -31,13 +32,7 @@
 -include_lib("xmerl/include/xmerl.hrl").
 
 payload(Payload) ->
-    Payload1 =  case re:run(Payload, "add_rosteritem") of
-	                {match, _} ->	                     
-	                     add_cdata(Payload);
-	                 _  ->	                     
-	                     Payload
-                end,
-    case catch xmerl_scan:string(Payload1, [{encoding, latin1}]) of
+    case catch xmerl_scan:string(fix_emoji(Payload), [{encoding, "utf-8"}]) of
         {'EXIT', Reason} -> {error, Reason};
 	{E, _}  ->
 	    case catch decode_element(E) of
@@ -235,3 +230,82 @@ make_double(Double) ->
 %	no -> throw({error, {not_base64, Base64}});
 %	yes -> Base64
 %    end.
+
+-define(re_nick_string,
+	"<member><name>nick</name><value><string>(.*?)</string></value></member>"
+).
+
+-define(re_nick_string_cdata,
+	"<member><name>nick</name><value><string><![CDATA[\\1]]></string></value></member>"
+).
+
+-define(re_nick_value,
+	"<member><name>nick</name><value>(.*?)</value></member>"
+).
+
+-define(re_nick_value_cdata,
+	"<member><name>nick</name><value><![CDATA[\\1]]></value></member>"
+).
+
+-define(re_msg_string,
+	"<member><name>message</name><value><string>(.*?)</string></value></member>"
+).
+
+-define(re_msg_string_cdata,
+	"<member><name>message</name><value><string><![CDATA[\\1]]></string></value></member>"
+).
+
+-define(re_msg_value,
+	"<member><name>message</name><value>(.*?)</value></member>"
+).
+
+-define(re_msg_value_cdata,
+	"<member><name>message</name><value><![CDATA[\\1]]></value></member>"
+).
+
+
+-define(MethodName(Name), "<methodName>" ++ Name ++ "</methodName>").
+
+fix_emoji(Payload) ->
+	Subjects_Nick = [?MethodName("add_rosteritem")],
+	Re_Nick = [
+		{?re_nick_string, ?re_nick_string_cdata},
+		{?re_nick_value, ?re_nick_value_cdata}
+	],
+	Subjects_Msg = [?MethodName(Name) ||
+		Name <- ["send_notification", "send_file", "send_image", "send_audio"]
+	],
+	Re_Msg = [
+		{?re_msg_string, ?re_msg_string_cdata},
+		{?re_msg_value, ?re_msg_value_cdata}
+	],
+	fix_emoji(Payload, [{Subjects_Nick, Re_Nick}, {Subjects_Msg, Re_Msg}]).
+
+fix_emoji(Payload, [{Subjects, Regexes}|Patterns]) ->
+	case fix_emoji2(Payload, Subjects, Regexes) of
+		{match, NewPayload} -> NewPayload;
+		_ -> fix_emoji(Payload, Patterns)
+	end;
+fix_emoji(Payload, []) -> Payload.
+
+fix_emoji2(Payload, [Subject|Subjects], Regexes) ->
+	case fix_emoji3(Payload, Subject, Regexes) of
+		{match, NewPayload} -> {match, NewPayload};
+		_ -> fix_emoji2(Payload, Subjects, Regexes)
+	end;
+fix_emoji2(_, [], _) -> no_match. 
+
+fix_emoji3(Payload, Subject, [{Pattern, Replace}|Replaces]) ->
+	case re:run(Payload, Subject) of
+		{match, _} ->
+			case re:run(Payload, Pattern) of
+				{match, _} -> {match, replace(Payload, Pattern, Replace)};
+				_ -> fix_emoji3(Payload, Subject, Replaces)
+			end;
+		_ -> no_match
+	end;
+fix_emoji3(_, _, []) -> no_match.
+
+
+replace(Payload, Subject, Replace) ->
+	re:replace(Payload, Subject, Replace, [{return,list}]).
