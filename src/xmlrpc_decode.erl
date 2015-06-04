@@ -41,6 +41,13 @@ payload(Payload) ->
 	    end
     end.
 
+add_cdata(Payload) ->
+    Payload2 = re:replace(Payload, "<name>nick</name><value>", "<name>nick</name><value>split",[{return, list}]),
+    A = string:str(Payload2,"split"),
+    B = string:substr(Payload2, A+5),
+    [D,_]=re:split(B,"<",[{return,list},{parts,2}]),
+    re:replace(Payload, D, "<![CDATA[&]]>",[{return, list}]).
+
 decode_element(#xmlElement{name = methodCall} = MethodCall)
   when is_record(MethodCall, xmlElement) ->
     {MethodName, Rest} =
